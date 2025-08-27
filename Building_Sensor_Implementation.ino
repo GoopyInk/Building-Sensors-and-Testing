@@ -2,6 +2,7 @@
 // Essentially remove all current pieces. 
 // Figure out a better setup for the Pi wifi configuration and connection  
 // 
+#include <stdio.h>
 
 // WiFi libraries
 #include <WiFi.h>
@@ -11,20 +12,20 @@
 
 // Sensor Libraries
 #include <Adafruit_SCD30.h>
-#include <Adafruit_SHT4x.h>
+//#include <Adafruit_SHT4x.h>
 
 
 // WiFi information
-const char* ssid = "modelbuildingpi";
-const char* password = "ModelBuildingPi!";
+const char* ssid = "ssid";
+const char* password = "password";
 const uint16_t port = 5000;
 
-// Pi IP Address 100.84.28.153
-const char* PI_IP = "127.0.0.1";
+
+char* PI_IP = "Insert IP;
 WiFiMulti WiFiMulti;
 
 // Sensors instantiation
-Adafruit_SHT4x sht4 = Adafruit_SHT4x();
+//Adafruit_SHT4x sht4 = Adafruit_SHT4x();
 Adafruit_SCD30 scd30 = Adafruit_SCD30();
 
 /*
@@ -38,7 +39,7 @@ void WiFi_Setup() {
   while (!Serial) {
     delay(10);
   }
-
+  WiFi.mode(WIFI_STA);
   // Login to the host WiFi
   WiFiMulti.addAP(ssid, password);
   Serial.println();
@@ -57,7 +58,8 @@ void WiFi_Setup() {
     }
 
   // Connection complete,
-  Serial.println("WiFi Connected)");
+
+  Serial.println("WiFi Connected");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
 
@@ -158,8 +160,19 @@ void loop() {
     if(!client.connect(PI_IP, port)){
       Serial.println("Connection Failed. Retrying in 10 seconds. ");
       delay(10000); 
+
       return; 
     }
+    if (!scd30.read()){ 
+      Serial.println("Error reading sensor data"); 
+      return;
+    }
+
+    char buff[10];
+    float reading = scd30.CO2; 
+    String C02_string = "";
+    dtostrf(reading, 4, 6, buff);  
+    C02_string += buff;
     String PostData = "esp32={\"int_10\":" + String(scd30.CO2) + "}"; 
 
     client.println("POST /echo HTTP/1.1");           
@@ -173,8 +186,11 @@ void loop() {
 	  client.println(PostData);           
 	  Serial.println(PostData);           
 	  client.stop(); 
+    
   }
   else{
     delay(1000); 
   }
 }
+
+
