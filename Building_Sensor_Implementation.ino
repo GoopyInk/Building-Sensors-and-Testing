@@ -1,7 +1,4 @@
-// Switch to MQTT design to allow for improved accuracy and connection among components. 
-// Essentially remove all current pieces. 
-// Figure out a better setup for the Pi wifi configuration and connection  
-// 
+
 #include <stdio.h>
 
 // WiFi libraries
@@ -20,8 +17,7 @@ const char* ssid = "ssid";
 const char* password = "password";
 const uint16_t port = 5000;
 
-
-char* PI_IP = "Insert IP;
+char* PI_IP = "IP";
 WiFiMulti WiFiMulti;
 
 // Sensors instantiation
