@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Building Testbed Control</title>
+  <style>
+    body {
+      font-family: Arial;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f5f5f5;
+    }
+    .page {
+      text-align: center;
+      width: 100%;
+      max-width: 900px;
+    }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-gap: 40px;
+    }
+    .card {
+      background-color: #fff;
+      border: 1px solid #ccc;
+      padding: 25px;
+      text-align: center;
+      border-radius: 12px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    h1 :
+      margin-bottom: 40px;
+    }
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 15px 0;
+    }
+    input[type="range"] {
+      flex: 1;
+    }
+    .value {
+      min-width: 40px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<div class="page">
+  <h1>Airflow Control Panel</h1>
+  <div class="grid-container">
+    
+    <div class="card">
+      <h3>Inlet Fan</h3>
+      <div class="slider-container">
+        <input type="range" min="0" max="100" id="inletFan" value="0">
+        <span class="value" id="inletFanValue">0%</span>
+      </div>
+      <button onclick="setFan('inlet')">Apply</button>
+    </div>
+
+    <div class="card">
+      <h3>Outlet Fan</h3>
+      <div class="slider-container">
+        <input type="range" min="0" max="100" id="outletFan" value="0">
+        <span class="value" id="outletFanValue">0%</span>
+      </div>
+      <button onclick="setFan('outlet')">Apply</button>
+    </div>
+
+    <div class="card">
+      <h3>Inlet Vent</h3>
+      <div class="slider-container">
+        <input type="range" min="0" max="70" id="inletVent" value="0">
+        <span class="value" id="inletVentValue">0deg</span>
+      </div>
+      <button onclick="setVent('inlet')">Apply</button>
+    </div>
+
+    <div class="card">
+      <h3>Outlet Vent</h3>
+      <div class="slider-container">
+        <input type="range" min="0" max="70" id="outletVent" value="0">
+        <span class="value" id="outletVentValue">0deg</span>
+      </div>
+      <button onclick="setVent('outlet')">Apply</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function setFan(fan) {
+  const speed = document.getElementById(fan + 'Fan').value;
+  fetch('/fan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fan, speed })
+  });
+}
+
+function setVent(vent) {
+  const angle = document.getElementById(vent + 'Vent').value;
+  fetch('/vent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vent, angle })
+  });
+}
+
+// Dynamically update the number next to the slider
+//function updateValue(spanId, value) {
+//  const span = document.getElementById(spanId);
+//  span.textContent = value + (spanId.includes('Vent') ? 'deg' : '%');
+//}
+
+//live update slider values
+function initSlider(id, unit) {
+    const slider = document.getElementById(id);
+    const label = document.getElementById(id + "Value");
+
+    slider.value = 0;
+    label.textContent = "0" + unit;
+
+    slider.oninput = () => {
+    label.textContent = slider.value + unit;
+  };
+}
+
+// Initialize all sliders to 0 on page load
+window.onload = () => {
+  initSlider("inletFan", "%");
+  initSlider("outletFan", "%");
+  initSlider("inletVent", "deg");
+  initSlider("outletVent", "deg");
+};
+</script>
+
+</body>
+</html>
