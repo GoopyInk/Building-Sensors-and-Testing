@@ -2,6 +2,9 @@
 from flask import Flask, request, jsonify, send_file, Response
 import time
 import csv
+from flask import Flask, request, jsonify, send_file, Response
+import time
+import csv
 import os
 import re
 from datetime import datetime
@@ -18,18 +21,17 @@ import matplotlib.pyplot as plt
 HTTP_HOST = '0.0.0.0'
 HTTP_PORT = 5000
 
-CSV_WRITE_INTERVAL = 30        # seconds between CSV writes
-MAX_CSV_FILES = 5              # keep at most N CSV files
-DATA_CHECK_DELAY = 0.1         # loop sleep for writer thread
+CSV_WRITE_INTERVAL = 5        # shorter for testing; increase later
+MAX_CSV_FILES = 5
+DATA_CHECK_DELAY = 0.1
 
 CSV_FILENAME_PREFIX = "co2_data_"
 CSV_FILE_EXTENSION = ".csv"
 
 app = Flask(__name__)
 
-# In-memory buffer for recent data before writing to CSV
-data_buffer = []
-last_write_time = time.time()
+
+app = Flask(__name__)
 
 # ---------- CO2 CSV helpers ----------
 
@@ -92,7 +94,7 @@ def parse_co2_value(esp32_data):
 
 @app.route("/")
 def index():
-    # Airflow control UI + image tag for CO2 plot
+    # Airflow control UI + image tags for CO2 & Temperature plots
     html = """
     <!DOCTYPE html>
     <html>
@@ -113,6 +115,11 @@ def index():
           width: 100%;
           max-width: 1100px;
         }
+        h1 {
+          text-align: center;
+          margin-bottom: 40px;
+        }
+
         .grid-container {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -126,10 +133,7 @@ def index():
           border-radius: 12px;
           box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
-        h1 {
-          text-align: center;
-          margin-bottom: 40px;
-        }
+
         .slider-container {
           display: flex;
           align-items: center;
@@ -143,25 +147,45 @@ def index():
           min-width: 40px;
           font-weight: bold;
         }
-        .plot-container {
+
+        /* Metrics row for CO2 and Temperature, matching the card look */
+        .metrics-row {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          grid-gap: 40px;
           margin-top: 40px;
-          text-align: center;
-          background: #fff;
+        }
+        .metric-card {
+          background-color: #fff;
           border-radius: 12px;
           padding: 20px;
           box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+          border: 1px solid #ccc;
+          text-align: center;
         }
-        img {
+        .metric-card h3 {
+          margin-top: 0;
+          margin-bottom: 10px;
+        }
+        .metric-card p {
+          margin-top: 0;
+          margin-bottom: 15px;
+          color: #555;
+          font-size: 0.9rem;
+        }
+        .metric-card img {
           max-width: 100%;
           height: auto;
+          border-radius: 8px;
+          border: 1px solid #eee;
         }
       </style>
     </head>
     <body>
     <div class="page">
       <h1>Airflow & CO₂ Control Panel</h1>
-      <div class="grid-container">
 
+      <div class="grid-container">
         <div class="card">
           <h3>Inlet Fan</h3>
           <div class="slider-container">
@@ -197,13 +221,22 @@ def index():
           </div>
           <button onclick="setVent('outlet')">Apply</button>
         </div>
-
       </div>
 
-      <div class="plot-container">
-        <h3>CO₂ vs Time</h3>
-        <p>Plot is regenerated on each page load from co2_data_*.csv.</p>
-        <img src="/plot.png?ts=TIMESTAMP_PLACEHOLDER" alt="CO2 plot">
+      <!-- New metrics row: CO2 (left) and Temperature (right) -->
+      <div class="metrics-row">
+        <div class="metric-card">
+          <h3>CO₂ vs Time</h3>
+          <p>Plot is regenerated on each page load from co2_data_*.csv.</p>
+          <img src="/plot.png?ts=TIMESTAMP_PLACEHOLDER" alt="CO2 plot">
+        </div>
+
+        <div class="metric-card">
+          <h3>Temperature vs Time</h3>
+          <p>Temperature data is captured along with CO₂ and can be plotted here.</p>
+          <!-- For now this uses the same endpoint; replace with /temp_plot.png when you add it -->
+          <img src="/plot.png?kind=temp&ts=TIMESTAMP_PLACEHOLDER" alt="Temperature plot">
+        </div>
       </div>
     </div>
 
@@ -241,9 +274,14 @@ def index():
       initSlider("outletFan", "%");
       initSlider("inletVent", "deg");
       initSlider("outletVent", "deg");
-      // bust cache on plot
-      const img = document.querySelector('.plot-container img');
-      img.src = '/plot.png?ts=' + new Date().getTime();
+
+      // bust cache on plots
+      const now = new Date().getTime();
+      const co2Img = document.querySelectorAll('.metric-card img')[0];
+      const tempImg = document.querySelectorAll('.metric-card img')[1];
+
+      co2Img.src = '/plot.png?ts=' + now;
+      tempImg.src = '/plot.png?kind=temp&ts=' + now; // change endpoint when you add temp plot
     };
     </script>
     </body>
@@ -251,6 +289,7 @@ def index():
     """
     return Response(html, mimetype="text/html")
 
+   
 # ---------- API: fans/vents ----------
 
 @app.route("/fan", methods=["POST"])
@@ -270,92 +309,32 @@ def set_vent():
     print(f"Set vent {vent} to {angle}")
     # TODO: call your hardware control here
     return jsonify(status="ok")
-
-# ---------- API: CO2 ingest (from Bluetooth bridge) ----------
-
-@app.route('/echo', methods=['POST'])
-def echo():
-    """
-    Expects form field "esp32" containing JSON with at least:
-    int_10 (CO2), mac, optionally ts and temp_c.
-    """
-    global data_buffer
-    try:
-        esp32_data = request.values.get('esp32')
-        if esp32_data:
-            parsed = parse_co2_value(esp32_data)
-            if parsed is not None:
-                # Store timestamp, CO2, temp, MAC
-                data_buffer.append([
-                    parsed["timestamp"],
-                    parsed["co2_ppm"],
-                    parsed["temp_c"],
-                    parsed["mac_address"]
-                ])
-                print(
-                    f"Received CO2: {parsed['co2_ppm']} ppm, "
-                    f"Temp: {parsed['temp_c']} °C, "
-                    f"MAC: {parsed['mac_address']}, "
-                    f"TS: {parsed['timestamp']}"
-                )
-        return jsonify('success'), 200
-    except Exception as e:
-        print(f"Error processing /echo request: {e}")
-        return jsonify('error'), 400
-
-
-# ---------- Background CSV writer ----------
-
-def csv_writer_thread():
-    global data_buffer, last_write_time
-    while True:
-        try:
-            current_time = time.time()
-            if current_time - last_write_time >= CSV_WRITE_INTERVAL:
-                if data_buffer:
-                    cleanup_old_files()
-                    file_number = get_next_file_number()
-                    filename = f"{CSV_FILENAME_PREFIX}{file_number}{CSV_FILE_EXTENSION}"
-
-                    # Copy then clear buffer
-                    data_to_write = data_buffer.copy()
-                    data_buffer.clear()
-
-                    with open(filename, 'w', newline='') as csvfile:
-                      writer = csv.writer(csvfile)
-                      writer.writerow(['timestamp', 'co2_ppm', 'temp_c', 'mac_address'])
-                      writer.writerows(data_to_write)
-
-
-                    print(f"Wrote {len(data_to_write)} records to {filename}")
-
-                last_write_time = current_time
-            time.sleep(DATA_CHECK_DELAY)
-        except Exception as e:
-            print(f"Error in CSV writer: {e}")
-            time.sleep(DATA_CHECK_DELAY)
-
+  
+  
 # ---------- CO2 plot endpoint ----------
 
 @app.route("/plot.png")
 def plot_png():
     pattern = f"{CSV_FILENAME_PREFIX}*{CSV_FILE_EXTENSION}"
     csv_files = glob.glob(pattern)
-    if not csv_files:
-        # simple placeholder image if no data
+
+    dfs = []
+
+    # Load CSV data if any
+    for f in csv_files:
+        df = pd.read_csv(f)
+        df = df.rename(columns={
+            "co2ppm": "co2_ppm",
+            "macaddress": "mac_address"
+        })
+        dfs.append(df)
+
+    # Also include current in-memory buffer so you see latest point
+    if not dfs:
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.text(0.5, 0.5, "No CO2 data yet", ha="center", va="center")
         ax.axis("off")
     else:
-        dfs = []
-        for f in csv_files:
-            df = pd.read_csv(f)
-            # Backwards compatible with old column names if any
-            df = df.rename(columns={
-                "co2ppm": "co2_ppm",
-                "macaddress": "mac_address"
-            })
-            dfs.append(df)
         co2_all = pd.concat(dfs, ignore_index=True)
         co2_all["timestamp"] = pd.to_datetime(co2_all["timestamp"])
 
@@ -398,8 +377,6 @@ def plot_png():
 
 def main():
     print(f"Starting CO2 server on {HTTP_HOST}:{HTTP_PORT}")
-    csv_thread = threading.Thread(target=csv_writer_thread, daemon=True)
-    csv_thread.start()
     app.run(host=HTTP_HOST, port=HTTP_PORT, debug=False)
 
 if __name__ == "__main__":
