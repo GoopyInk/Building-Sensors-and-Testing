@@ -59,20 +59,34 @@ def cleanup_old_files():
 
 def parse_co2_value(esp32_data):
     """
-    esp32_data is a JSON string like:
-    {"int_10": 1234.5, "mac": "AA:BB:CC:DD:EE:FF"}
+    esp32_data JSON example:
+    {"ts": "2026-02-10T23:15:42", "int_10": 1234.5,
+     "temp_c": 21.37, "mac": "AA:BB:CC:DD:EE:FF"}
     """
     try:
         data = json.loads(esp32_data)
-        co2_val = 0.0
-        mac_addr = ""
-        if 'int_10' in data:
-            co2_val = float(data['int_10'])
-        if 'mac' in data:
-            mac_addr = data['mac']
-        return co2_val, mac_addr
+        co2_val = float(data.get('int_10', 0.0))
+        mac_addr = data.get('mac', '')
+        temp_c = data.get('temp_c')  # may be None if not sent
+        ts = data.get('ts')
+
+        # If no timestamp provided, fall back to server time
+        if ts:
+            try:
+                # Ensure it parses; store as ISO string
+                timestamp = datetime.fromisoformat(ts).isoformat()
+            except ValueError:
+                timestamp = datetime.now().isoformat()
+        else:
+            timestamp = datetime.now().isoformat()
+
+        return {"timestamp": timestamp,
+                "co2_ppm": co2_val,
+                "temp_c": temp_c,
+                "mac_address": mac_addr}
     except (json.JSONDecodeError, ValueError, KeyError):
-        return None, ""
+        return None
+
 
 # ---------- Web UI: main page ----------
 
@@ -262,23 +276,33 @@ def set_vent():
 @app.route('/echo', methods=['POST'])
 def echo():
     """
-    Expects a form field "esp32" whose value is a JSON string:
-    {"int_10": ..., "mac": "..."}
-    The Python Bluetooth bridge posts this field.
+    Expects form field "esp32" containing JSON with at least:
+    int_10 (CO2), mac, optionally ts and temp_c.
     """
     global data_buffer
     try:
         esp32_data = request.values.get('esp32')
         if esp32_data:
-            co2_value, mac_address = parse_co2_value(esp32_data)
-            if co2_value is not None:
-                timestamp = datetime.now().isoformat()
-                data_buffer.append([timestamp, co2_value, mac_address])
-                print(f"Received CO2: {co2_value} ppm from MAC: {mac_address}")
+            parsed = parse_co2_value(esp32_data)
+            if parsed is not None:
+                # Store timestamp, CO2, temp, MAC
+                data_buffer.append([
+                    parsed["timestamp"],
+                    parsed["co2_ppm"],
+                    parsed["temp_c"],
+                    parsed["mac_address"]
+                ])
+                print(
+                    f"Received CO2: {parsed['co2_ppm']} ppm, "
+                    f"Temp: {parsed['temp_c']} °C, "
+                    f"MAC: {parsed['mac_address']}, "
+                    f"TS: {parsed['timestamp']}"
+                )
         return jsonify('success'), 200
     except Exception as e:
         print(f"Error processing /echo request: {e}")
         return jsonify('error'), 400
+
 
 # ---------- Background CSV writer ----------
 
@@ -298,9 +322,10 @@ def csv_writer_thread():
                     data_buffer.clear()
 
                     with open(filename, 'w', newline='') as csvfile:
-                        writer = csv.writer(csvfile)
-                        writer.writerow(['timestamp', 'co2_ppm', 'mac_address'])
-                        writer.writerows(data_to_write)
+                      writer = csv.writer(csvfile)
+                      writer.writerow(['timestamp', 'co2_ppm', 'temp_c', 'mac_address'])
+                      writer.writerows(data_to_write)
+
 
                     print(f"Wrote {len(data_to_write)} records to {filename}")
 
